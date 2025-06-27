@@ -6,6 +6,8 @@ BUILD_DIR = build
 MAIN_PATH = cmd/client/main.go
 CONFIG_FILE = config.yaml
 BRANCH_FILE = branch
+VERSIONS_DIR = versions
+BEDROCK_ARCHIVE = $(VERSIONS_DIR)/bedrock-server
 
 # Go build flags
 LDFLAGS = -ldflags "-X main.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 'dev')"
@@ -13,7 +15,7 @@ LDFLAGS = -ldflags "-X main.Version=$(shell git describe --tags --always --dirty
 # Default target
 .DEFAULT_GOAL := help
 
-.PHONY: help build run clean test deps install docker-build docker-run docker-clean branch-main branch-dev branch-staging branch-production
+.PHONY: help build run clean test deps install docker-build docker-run docker-clean branch-main branch-dev branch-staging branch-production bedrock-split bedrock-recombine bedrock-extract bedrock-clean bedrock-status
 
 # Help target
 help: ## Show this help message
@@ -29,6 +31,13 @@ help: ## Show this help message
 	@echo "  \033[36mbranch-dev\033[0m         Switch to dev branch"
 	@echo "  \033[36mbranch-staging\033[0m     Switch to staging branch"
 	@echo "  \033[36mbranch-production\033[0m  Switch to production branch"
+	@echo ""
+	@echo "Bedrock Server Management:"
+	@echo "  \033[36mbedrock-split\033[0m      Split Bedrock archive into 10 layers"
+	@echo "  \033[36mbedrock-recombine\033[0m  Recombine layers into archive"
+	@echo "  \033[36mbedrock-extract\033[0m    Extract recombined archive"
+	@echo "  \033[36mbedrock-clean\033[0m      Clean Bedrock files and layers"
+	@echo "  \033[36mbedrock-status\033[0m     Show Bedrock server status"
 	@echo ""
 
 # Dependencies
@@ -121,6 +130,76 @@ branch-production: ## Switch to production branch
 	@echo "production" > $(BRANCH_FILE)
 	@echo "Switched to production branch"
 
+# Bedrock server management commands
+bedrock-split: ## Split Bedrock archive into 10 layers
+	@echo "Splitting Bedrock server archive..."
+	@if [ ! -f $(BEDROCK_ARCHIVE) ]; then \
+		echo "Error: $(BEDROCK_ARCHIVE) not found"; \
+		echo "Please place your Bedrock server archive in $(BEDROCK_ARCHIVE)"; \
+		exit 1; \
+	fi
+	@mkdir -p $(VERSIONS_DIR)
+	@echo "Archive size: $(shell stat -c%s $(BEDROCK_ARCHIVE)) bytes"
+	@echo "Layer size: $(shell echo $$(($(shell stat -c%s $(BEDROCK_ARCHIVE)) / 10)) bytes"
+	@echo "Splitting into 10 layers..."
+	@split -b $$(($(shell stat -c%s $(BEDROCK_ARCHIVE)) / 10)) $(BEDROCK_ARCHIVE) $(VERSIONS_DIR)/bedrock-server.layer.
+	@echo "Layers created:"
+	@ls -la $(VERSIONS_DIR)/bedrock-server.layer.*
+
+bedrock-recombine: ## Recombine layers into archive
+	@echo "Recombining Bedrock server layers..."
+	@if [ ! -f $(VERSIONS_DIR)/bedrock-server.layer.aa ]; then \
+		echo "Error: No layer files found in $(VERSIONS_DIR)/"; \
+		echo "Run 'make bedrock-split' first"; \
+		exit 1; \
+	fi
+	@cat $(VERSIONS_DIR)/bedrock-server.layer.* > $(VERSIONS_DIR)/bedrock-server-recombined
+	@echo "Archive recombined: $(VERSIONS_DIR)/bedrock-server-recombined"
+	@echo "Size: $(shell stat -c%s $(VERSIONS_DIR)/bedrock-server-recombined) bytes"
+
+bedrock-extract: ## Extract recombined archive
+	@echo "Extracting Bedrock server archive..."
+	@if [ ! -f $(VERSIONS_DIR)/bedrock-server-recombined ]; then \
+		echo "Error: Recombined archive not found"; \
+		echo "Run 'make bedrock-recombine' first"; \
+		exit 1; \
+	fi
+	@rm -rf bedrock-server-extracted
+	@mkdir -p bedrock-server-extracted
+	@echo "Attempting tar.gz extraction..."
+	@if tar -xzf $(VERSIONS_DIR)/bedrock-server-recombined -C bedrock-server-extracted 2>/dev/null; then \
+		echo "Extracted with tar.gz"; \
+	elif unzip -o $(VERSIONS_DIR)/bedrock-server-recombined -d bedrock-server-extracted 2>/dev/null; then \
+		echo "Extracted with unzip"; \
+	else \
+		echo "Failed to extract archive. Trying to find bedrock_server executable..."; \
+		if find bedrock-server-extracted -name "bedrock_server" -type f 2>/dev/null; then \
+			echo "Found bedrock_server executable"; \
+		else \
+			echo "No bedrock_server executable found in extracted files"; \
+		fi; \
+	fi
+	@if [ -f bedrock-server-extracted/bedrock_server ]; then \
+		chmod +x bedrock-server-extracted/bedrock_server; \
+		echo "Made bedrock_server executable"; \
+	fi
+
+bedrock-clean: ## Clean Bedrock files and layers
+	@echo "Cleaning Bedrock server files..."
+	@rm -f $(VERSIONS_DIR)/bedrock-server.layer.* 2>/dev/null || true
+	@rm -f $(VERSIONS_DIR)/bedrock-server-recombined 2>/dev/null || true
+	@rm -rf bedrock-server-extracted 2>/dev/null || true
+	@echo "Bedrock files cleaned"
+
+bedrock-status: ## Show Bedrock server status
+	@echo "Bedrock Server Status"
+	@echo "===================="
+	@echo "Original archive: $(shell [ -f $(BEDROCK_ARCHIVE) ] && echo "Yes ($(shell stat -c%s $(BEDROCK_ARCHIVE)) bytes)" || echo "No")"
+	@echo "Layer files: $(shell ls $(VERSIONS_DIR)/bedrock-server.layer.* 2>/dev/null | wc -l | tr -d ' ') / 10"
+	@echo "Recombined archive: $(shell [ -f $(VERSIONS_DIR)/bedrock-server-recombined ] && echo "Yes ($(shell stat -c%s $(VERSIONS_DIR)/bedrock-server-recombined) bytes)" || echo "No")"
+	@echo "Extracted directory: $(shell [ -d bedrock-server-extracted ] && echo "Yes" || echo "No")"
+	@echo "Executable: $(shell [ -f bedrock-server-extracted/bedrock_server ] && echo "Yes (executable)" || echo "No")"
+
 # Configuration commands
 config-check: ## Check configuration file
 	@echo "Checking configuration..."
@@ -151,6 +230,8 @@ status: ## Show application status
 	@echo "Config exists: $(shell [ -f $(CONFIG_FILE) ] && echo "Yes" || echo "No")"
 	@echo "Branch file: $(shell [ -f $(BRANCH_FILE) ] && echo "Yes ($(shell cat $(BRANCH_FILE)))" || echo "No (using default)")"
 	@echo "Docker image: $(shell docker images minecraft-bedrock-manager 2>/dev/null | grep -q minecraft-bedrock-manager && echo "Yes" || echo "No")"
+	@echo ""
+	@$(MAKE) bedrock-status
 
 # Development commands
 fmt: ## Format Go code
@@ -176,7 +257,8 @@ setup: ## Quick setup for new users
 	@echo "Setup completed!"
 	@echo "Next steps:"
 	@echo "1. Edit config.yaml with your GitHub repository settings"
-	@echo "2. Download Bedrock server executable to ./bedrock_server"
+	@echo "2. Option 1: Download Bedrock server executable to ./bedrock_server"
+	@echo "2. Option 2: Place Bedrock server archive in versions/bedrock-server and run 'make bedrock-split bedrock-recombine bedrock-extract'"
 	@echo "3. Run 'make run' to start the application"
 
 # All-in-one development command
@@ -195,4 +277,9 @@ current-branch: ## Show current branch configuration
 		echo "Branch file: $(shell cat $(BRANCH_FILE))"; \
 	else \
 		echo "No branch file found, using default from config.yaml"; \
-	fi 
+	fi
+
+# Complete Bedrock setup
+bedrock-setup: bedrock-split bedrock-recombine bedrock-extract ## Complete Bedrock server setup
+	@echo "Bedrock server setup completed!"
+	@echo "Executable ready: bedrock-server-extracted/bedrock_server" 

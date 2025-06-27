@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -25,6 +28,7 @@ type Manager struct {
 	mu            sync.RWMutex
 	lastConfig    *config.RepoConfig
 	lastCommitSHA string
+	bedrockPath   string
 }
 
 type MinecraftServer struct {
@@ -52,6 +56,7 @@ type ManagerStatus struct {
 	Stopped      int            `json:"stopped"`
 	Servers      []ServerStatus `json:"servers"`
 	LastUpdate   time.Time      `json:"last_update"`
+	BedrockPath  string         `json:"bedrock_path"`
 }
 
 type WhitelistEntry struct {
@@ -76,6 +81,12 @@ func NewManager(cfg *config.Config, logger *logrus.Logger) *Manager {
 func (m *Manager) Start(ctx context.Context, githubClient *github.Client) {
 	m.logger.Info("Starting Minecraft Bedrock server manager")
 
+	// Initialize Bedrock server
+	if err := m.initializeBedrockServer(); err != nil {
+		m.logger.Errorf("Failed to initialize Bedrock server: %v", err)
+		return
+	}
+
 	// Set GitHub client configuration
 	githubClient.SetBranch(m.config.GitHub.Branch)
 	githubClient.SetConfigPath(m.config.GitHub.ConfigPath)
@@ -96,6 +107,289 @@ func (m *Manager) Start(ctx context.Context, githubClient *github.Client) {
 			m.pollConfiguration(githubClient)
 		}
 	}
+}
+
+func (m *Manager) initializeBedrockServer() error {
+	versionsDir := "versions"
+	bedrockArchive := filepath.Join(versionsDir, "bedrock-server")
+
+	// Check if versions/bedrock-server exists
+	if _, err := os.Stat(bedrockArchive); err != nil {
+		if os.IsNotExist(err) {
+			m.logger.Info("No Bedrock server archive found in versions/, using configured path")
+			m.bedrockPath = m.config.Server.BedrockPath
+			return nil
+		}
+		return fmt.Errorf("failed to check Bedrock server archive: %w", err)
+	}
+
+	m.logger.Info("Found Bedrock server archive, processing...")
+
+	// Remove existing layer files and extracted directory
+	if err := m.cleanupLayers(); err != nil {
+		return fmt.Errorf("failed to cleanup existing files: %w", err)
+	}
+
+	// Split the archive into 10 layers
+	if err := m.splitArchive(bedrockArchive); err != nil {
+		return fmt.Errorf("failed to split archive: %w", err)
+	}
+
+	// Recombine the layers
+	if err := m.recombineLayers(); err != nil {
+		return fmt.Errorf("failed to recombine layers: %w", err)
+	}
+
+	// Extract the archive
+	if err := m.extractArchive(); err != nil {
+		return fmt.Errorf("failed to extract archive: %w", err)
+	}
+
+	// Set the Bedrock path to the extracted executable
+	m.bedrockPath = "./bedrock-server-extracted/bedrock_server"
+	m.logger.Infof("Bedrock server initialized at: %s", m.bedrockPath)
+
+	return nil
+}
+
+func (m *Manager) cleanupLayers() error {
+	// Remove existing layer files
+	for i := 0; i < 10; i++ {
+		layerFile := fmt.Sprintf("versions/bedrock-server.layer.%d", i)
+		if err := os.Remove(layerFile); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("failed to remove layer file %s: %w", layerFile, err)
+		}
+	}
+
+	// Remove extracted directory
+	if err := os.RemoveAll("bedrock-server-extracted"); err != nil {
+		return fmt.Errorf("failed to remove extracted directory: %w", err)
+	}
+
+	// Remove recombined archive
+	if err := os.Remove("versions/bedrock-server-recombined"); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove recombined archive: %w", err)
+	}
+
+	return nil
+}
+
+func (m *Manager) splitArchive(archivePath string) error {
+	// Open the archive file
+	file, err := os.Open(archivePath)
+	if err != nil {
+		return fmt.Errorf("failed to open archive: %w", err)
+	}
+	defer file.Close()
+
+	// Get file size
+	stat, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to get file stats: %w", err)
+	}
+	fileSize := stat.Size()
+
+	// Calculate layer size
+	layerSize := fileSize / 10
+	remainder := fileSize % 10
+
+	m.logger.Infof("Splitting archive into 10 layers (file size: %d bytes, layer size: %d bytes)", fileSize, layerSize)
+
+	// Create layers directory if it doesn't exist
+	if err := os.MkdirAll("versions", 0755); err != nil {
+		return fmt.Errorf("failed to create versions directory: %w", err)
+	}
+
+	// Split the file into 10 layers
+	for i := 0; i < 10; i++ {
+		layerFile := fmt.Sprintf("versions/bedrock-server.layer.%d", i)
+
+		// Calculate actual layer size (last layer gets the remainder)
+		actualLayerSize := layerSize
+		if i == 9 {
+			actualLayerSize += remainder
+		}
+
+		// Create layer file
+		layer, err := os.Create(layerFile)
+		if err != nil {
+			return fmt.Errorf("failed to create layer file %s: %w", layerFile, err)
+		}
+
+		// Copy data to layer
+		written, err := io.CopyN(layer, file, actualLayerSize)
+		if err != nil && err != io.EOF {
+			layer.Close()
+			return fmt.Errorf("failed to write layer %d: %w", i, err)
+		}
+
+		layer.Close()
+		m.logger.Infof("Created layer %d: %s (%d bytes)", i, layerFile, written)
+	}
+
+	return nil
+}
+
+func (m *Manager) recombineLayers() error {
+	m.logger.Info("Recombining layers...")
+
+	// Create recombined file
+	recombinedFile := "versions/bedrock-server-recombined"
+	output, err := os.Create(recombinedFile)
+	if err != nil {
+		return fmt.Errorf("failed to create recombined file: %w", err)
+	}
+	defer output.Close()
+
+	// Combine all layers
+	for i := 0; i < 10; i++ {
+		layerFile := fmt.Sprintf("versions/bedrock-server.layer.%d", i)
+
+		// Check if layer file exists
+		if _, err := os.Stat(layerFile); err != nil {
+			return fmt.Errorf("layer file %s not found: %w", layerFile, err)
+		}
+
+		// Open layer file
+		layer, err := os.Open(layerFile)
+		if err != nil {
+			return fmt.Errorf("failed to open layer file %s: %w", layerFile, err)
+		}
+
+		// Copy layer data to recombined file
+		written, err := io.Copy(output, layer)
+		if err != nil {
+			layer.Close()
+			return fmt.Errorf("failed to copy layer %d: %w", i, err)
+		}
+
+		layer.Close()
+		m.logger.Infof("Added layer %d to recombined file (%d bytes)", i, written)
+	}
+
+	// Verify file integrity
+	if err := m.verifyIntegrity(); err != nil {
+		return fmt.Errorf("integrity check failed: %w", err)
+	}
+
+	m.logger.Info("Layers recombined successfully")
+	return nil
+}
+
+func (m *Manager) verifyIntegrity() error {
+	originalFile := "versions/bedrock-server"
+	recombinedFile := "versions/bedrock-server-recombined"
+
+	// Calculate SHA256 of original file
+	originalHash, err := m.calculateFileHash(originalFile)
+	if err != nil {
+		return fmt.Errorf("failed to calculate original file hash: %w", err)
+	}
+
+	// Calculate SHA256 of recombined file
+	recombinedHash, err := m.calculateFileHash(recombinedFile)
+	if err != nil {
+		return fmt.Errorf("failed to calculate recombined file hash: %w", err)
+	}
+
+	// Compare hashes
+	if originalHash != recombinedHash {
+		return fmt.Errorf("integrity check failed: hashes don't match (original: %s, recombined: %s)", originalHash, recombinedHash)
+	}
+
+	m.logger.Infof("Integrity check passed: %s", originalHash)
+	return nil
+}
+
+func (m *Manager) calculateFileHash(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func (m *Manager) extractArchive() error {
+	m.logger.Info("Extracting Bedrock server archive...")
+
+	// Create extraction directory
+	extractDir := "bedrock-server-extracted"
+	if err := os.MkdirAll(extractDir, 0755); err != nil {
+		return fmt.Errorf("failed to create extraction directory: %w", err)
+	}
+
+	// Determine archive type and extract
+	archivePath := "versions/bedrock-server-recombined"
+
+	// Try to determine if it's a tar.gz, zip, or other format
+	// For now, we'll assume it's a tar.gz (common for Bedrock server)
+
+	// Use tar to extract
+	cmd := exec.Command("tar", "-xzf", archivePath, "-C", extractDir)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Run(); err != nil {
+		// If tar.gz fails, try zip
+		m.logger.Info("tar.gz extraction failed, trying zip...")
+		cmd = exec.Command("unzip", "-o", archivePath, "-d", extractDir)
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to extract archive (tried tar.gz and zip): %w", err)
+		}
+	}
+
+	// Look for the bedrock_server executable
+	bedrockExecutable := filepath.Join(extractDir, "bedrock_server")
+	if _, err := os.Stat(bedrockExecutable); err != nil {
+		// Try to find it recursively
+		found, err := m.findBedrockExecutable(extractDir)
+		if err != nil {
+			return fmt.Errorf("failed to find bedrock_server executable: %w", err)
+		}
+		bedrockExecutable = found
+	}
+
+	// Make it executable
+	if err := os.Chmod(bedrockExecutable, 0755); err != nil {
+		return fmt.Errorf("failed to make bedrock_server executable: %w", err)
+	}
+
+	m.logger.Infof("Bedrock server extracted to: %s", bedrockExecutable)
+	return nil
+}
+
+func (m *Manager) findBedrockExecutable(dir string) (string, error) {
+	var found string
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() && info.Name() == "bedrock_server" {
+			found = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	if found == "" {
+		return "", fmt.Errorf("bedrock_server executable not found in extracted directory")
+	}
+
+	return found, nil
 }
 
 func (m *Manager) pollConfiguration(githubClient *github.Client) {
@@ -210,7 +504,7 @@ func (m *Manager) startServer(serverConfig *config.MinecraftServerConfig) {
 	}
 
 	// Start the server process
-	cmd := exec.Command(m.config.Server.BedrockPath,
+	cmd := exec.Command(m.bedrockPath,
 		"-port", strconv.Itoa(serverConfig.Port),
 		"-worldsdir", serverDir,
 		"-world", serverConfig.WorldName,
@@ -285,8 +579,8 @@ func (m *Manager) monitorServer(name string, cmd *exec.Cmd) {
 
 func (m *Manager) checkBedrockServer(version string) error {
 	// Check if Bedrock server executable exists
-	if _, err := os.Stat(m.config.Server.BedrockPath); err != nil {
-		return fmt.Errorf("Bedrock server executable not found at %s", m.config.Server.BedrockPath)
+	if _, err := os.Stat(m.bedrockPath); err != nil {
+		return fmt.Errorf("Bedrock server executable not found at %s", m.bedrockPath)
 	}
 	return nil
 }
@@ -385,6 +679,7 @@ func (m *Manager) GetStatus() ManagerStatus {
 	status := ManagerStatus{
 		TotalServers: len(m.servers),
 		LastUpdate:   time.Now(),
+		BedrockPath:  m.bedrockPath,
 	}
 
 	for name, server := range m.servers {
