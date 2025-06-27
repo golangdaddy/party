@@ -7,7 +7,7 @@ MAIN_PATH = cmd/client/main.go
 CONFIG_FILE = config.yaml
 BRANCH_FILE = branch
 VERSIONS_DIR = versions
-BEDROCK_ARCHIVE = $(VERSIONS_DIR)/bedrock-server
+BEDROCK_ARCHIVE = $(VERSIONS_DIR)/bedrock-server.zip
 
 # Go build flags
 LDFLAGS = -ldflags "-X main.Version=$(shell git describe --tags --always --dirty 2>/dev/null || echo 'dev')"
@@ -153,30 +153,33 @@ bedrock-recombine: ## Recombine layers into archive
 		echo "Run 'make bedrock-split' first"; \
 		exit 1; \
 	fi
-	@cat $(VERSIONS_DIR)/bedrock-server.layer.* > $(VERSIONS_DIR)/bedrock-server-recombined
-	@echo "Archive recombined: $(VERSIONS_DIR)/bedrock-server-recombined"
-	@echo "Size: $(shell stat -c%s $(VERSIONS_DIR)/bedrock-server-recombined) bytes"
+	@cat $(VERSIONS_DIR)/bedrock-server.layer.* > $(VERSIONS_DIR)/bedrock-server-recombined.zip
+	@echo "Archive recombined: $(VERSIONS_DIR)/bedrock-server-recombined.zip"
+	@echo "Size: $(shell stat -c%s $(VERSIONS_DIR)/bedrock-server-recombined.zip) bytes"
 
 bedrock-extract: ## Extract recombined archive
 	@echo "Extracting Bedrock server archive..."
-	@if [ ! -f $(VERSIONS_DIR)/bedrock-server-recombined ]; then \
+	@if [ ! -f $(VERSIONS_DIR)/bedrock-server-recombined.zip ]; then \
 		echo "Error: Recombined archive not found"; \
 		echo "Run 'make bedrock-recombine' first"; \
 		exit 1; \
 	fi
 	@rm -rf bedrock-server-extracted
 	@mkdir -p bedrock-server-extracted
-	@echo "Attempting tar.gz extraction..."
-	@if tar -xzf $(VERSIONS_DIR)/bedrock-server-recombined -C bedrock-server-extracted 2>/dev/null; then \
-		echo "Extracted with tar.gz"; \
-	elif unzip -o $(VERSIONS_DIR)/bedrock-server-recombined -d bedrock-server-extracted 2>/dev/null; then \
+	@echo "Extracting zip archive..."
+	@if unzip -o $(VERSIONS_DIR)/bedrock-server-recombined.zip -d bedrock-server-extracted 2>/dev/null; then \
 		echo "Extracted with unzip"; \
 	else \
-		echo "Failed to extract archive. Trying to find bedrock_server executable..."; \
-		if find bedrock-server-extracted -name "bedrock_server" -type f 2>/dev/null; then \
-			echo "Found bedrock_server executable"; \
+		echo "zip extraction failed, trying tar.gz..."; \
+		if tar -xzf $(VERSIONS_DIR)/bedrock-server-recombined.zip -C bedrock-server-extracted 2>/dev/null; then \
+			echo "Extracted with tar.gz"; \
 		else \
-			echo "No bedrock_server executable found in extracted files"; \
+			echo "Failed to extract archive. Trying to find bedrock_server executable..."; \
+			if find bedrock-server-extracted -name "bedrock_server" -type f 2>/dev/null; then \
+				echo "Found bedrock_server executable"; \
+			else \
+				echo "No bedrock_server executable found in extracted files"; \
+			fi; \
 		fi; \
 	fi
 	@if [ -f bedrock-server-extracted/bedrock_server ]; then \
@@ -187,7 +190,7 @@ bedrock-extract: ## Extract recombined archive
 bedrock-clean: ## Clean Bedrock files and layers
 	@echo "Cleaning Bedrock server files..."
 	@rm -f $(VERSIONS_DIR)/bedrock-server.layer.* 2>/dev/null || true
-	@rm -f $(VERSIONS_DIR)/bedrock-server-recombined 2>/dev/null || true
+	@rm -f $(VERSIONS_DIR)/bedrock-server-recombined.zip 2>/dev/null || true
 	@rm -rf bedrock-server-extracted 2>/dev/null || true
 	@echo "Bedrock files cleaned"
 
@@ -196,7 +199,7 @@ bedrock-status: ## Show Bedrock server status
 	@echo "===================="
 	@echo "Original archive: $(shell [ -f $(BEDROCK_ARCHIVE) ] && echo "Yes ($(shell stat -c%s $(BEDROCK_ARCHIVE)) bytes)" || echo "No")"
 	@echo "Layer files: $(shell ls $(VERSIONS_DIR)/bedrock-server.layer.* 2>/dev/null | wc -l | tr -d ' ') / 10"
-	@echo "Recombined archive: $(shell [ -f $(VERSIONS_DIR)/bedrock-server-recombined ] && echo "Yes ($(shell stat -c%s $(VERSIONS_DIR)/bedrock-server-recombined) bytes)" || echo "No")"
+	@echo "Recombined archive: $(shell [ -f $(VERSIONS_DIR)/bedrock-server-recombined.zip ] && echo "Yes ($(shell stat -c%s $(VERSIONS_DIR)/bedrock-server-recombined.zip) bytes)" || echo "No")"
 	@echo "Extracted directory: $(shell [ -d bedrock-server-extracted ] && echo "Yes" || echo "No")"
 	@echo "Executable: $(shell [ -f bedrock-server-extracted/bedrock_server ] && echo "Yes (executable)" || echo "No")"
 
@@ -258,7 +261,7 @@ setup: ## Quick setup for new users
 	@echo "Next steps:"
 	@echo "1. Edit config.yaml with your GitHub repository settings"
 	@echo "2. Option 1: Download Bedrock server executable to ./bedrock_server"
-	@echo "2. Option 2: Place Bedrock server archive in versions/bedrock-server and run 'make bedrock-split bedrock-recombine bedrock-extract'"
+	@echo "2. Option 2: Place Bedrock server archive in versions/bedrock-server.zip and run 'make bedrock-split bedrock-recombine bedrock-extract'"
 	@echo "3. Run 'make run' to start the application"
 
 # All-in-one development command

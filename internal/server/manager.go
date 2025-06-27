@@ -111,19 +111,19 @@ func (m *Manager) Start(ctx context.Context, githubClient *github.Client) {
 
 func (m *Manager) initializeBedrockServer() error {
 	versionsDir := "versions"
-	bedrockArchive := filepath.Join(versionsDir, "bedrock-server")
+	bedrockArchive := filepath.Join(versionsDir, "bedrock-server.zip")
 
-	// Check if versions/bedrock-server exists
+	// Check if versions/bedrock-server.zip exists
 	if _, err := os.Stat(bedrockArchive); err != nil {
 		if os.IsNotExist(err) {
-			m.logger.Info("No Bedrock server archive found in versions/, using configured path")
+			m.logger.Info("No Bedrock server archive found in versions/bedrock-server.zip, using configured path")
 			m.bedrockPath = m.config.Server.BedrockPath
 			return nil
 		}
 		return fmt.Errorf("failed to check Bedrock server archive: %w", err)
 	}
 
-	m.logger.Info("Found Bedrock server archive, processing...")
+	m.logger.Info("Found Bedrock server archive (bedrock-server.zip), processing...")
 
 	// Remove existing layer files and extracted directory
 	if err := m.cleanupLayers(); err != nil {
@@ -167,7 +167,7 @@ func (m *Manager) cleanupLayers() error {
 	}
 
 	// Remove recombined archive
-	if err := os.Remove("versions/bedrock-server-recombined"); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove("versions/bedrock-server-recombined.zip"); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove recombined archive: %w", err)
 	}
 
@@ -234,7 +234,7 @@ func (m *Manager) recombineLayers() error {
 	m.logger.Info("Recombining layers...")
 
 	// Create recombined file
-	recombinedFile := "versions/bedrock-server-recombined"
+	recombinedFile := "versions/bedrock-server-recombined.zip"
 	output, err := os.Create(recombinedFile)
 	if err != nil {
 		return fmt.Errorf("failed to create recombined file: %w", err)
@@ -277,8 +277,8 @@ func (m *Manager) recombineLayers() error {
 }
 
 func (m *Manager) verifyIntegrity() error {
-	originalFile := "versions/bedrock-server"
-	recombinedFile := "versions/bedrock-server-recombined"
+	originalFile := "versions/bedrock-server.zip"
+	recombinedFile := "versions/bedrock-server-recombined.zip"
 
 	// Calculate SHA256 of original file
 	originalHash, err := m.calculateFileHash(originalFile)
@@ -326,25 +326,23 @@ func (m *Manager) extractArchive() error {
 	}
 
 	// Determine archive type and extract
-	archivePath := "versions/bedrock-server-recombined"
+	archivePath := "versions/bedrock-server-recombined.zip"
 
-	// Try to determine if it's a tar.gz, zip, or other format
-	// For now, we'll assume it's a tar.gz (common for Bedrock server)
-
-	// Use tar to extract
-	cmd := exec.Command("tar", "-xzf", archivePath, "-C", extractDir)
+	// Since we know it's a zip file, try unzip first
+	m.logger.Info("Extracting zip archive...")
+	cmd := exec.Command("unzip", "-o", archivePath, "-d", extractDir)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Run(); err != nil {
-		// If tar.gz fails, try zip
-		m.logger.Info("tar.gz extraction failed, trying zip...")
-		cmd = exec.Command("unzip", "-o", archivePath, "-d", extractDir)
+		// If unzip fails, try tar.gz as fallback
+		m.logger.Info("zip extraction failed, trying tar.gz...")
+		cmd = exec.Command("tar", "-xzf", archivePath, "-C", extractDir)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("failed to extract archive (tried tar.gz and zip): %w", err)
+			return fmt.Errorf("failed to extract archive (tried zip and tar.gz): %w", err)
 		}
 	}
 
