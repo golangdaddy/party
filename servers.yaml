@@ -1,0 +1,140 @@
+servers:
+  - name: "survival-world"
+    port: 19132
+    version: "1.20.50"
+    world_name: "survival"
+    level_seed: "123456789"
+    level_type: "DEFAULT"
+    gamemode: "survival"
+    difficulty: "normal"
+    max_players: 20
+    online_mode: true
+    pvp: true
+    allow_flight: false
+    motd: "Welcome to Survival World!"
+    whitelist:
+      - "player1"
+      - "player2"
+    ops:
+      - "admin1"
+    default_player_permission_level: "member"
+    content_log_file_enabled: true
+    enable_scripts: false
+    enable_command_blocking: false
+    max_threads: 8
+    player_idle_timeout: 30
+    max_world_size: 10000
+    properties:
+      server-authoritative-movement: "server-auth"
+      player-movement-score-threshold: "20"
+
+  - name: "creative-world"
+    port: 19133
+    version: "1.20.50"
+    world_name: "creative"
+    level_seed: "987654321"
+    level_type: "FLAT"
+    gamemode: "creative"
+    difficulty: "peaceful"
+    max_players: 10
+    online_mode: true
+    pvp: false
+    allow_flight: true
+    motd: "Creative Building Server"
+    whitelist: []
+    ops:
+      - "admin1"
+      - "admin2"
+    default_player_permission_level: "member"
+    content_log_file_enabled: true
+    enable_scripts: true
+    enable_command_blocking: false
+    max_threads: 4
+    player_idle_timeout: 60
+    max_world_size: 5000
+    properties:
+      server-authoritative-movement: "client-auth"
+      allow-cheats: "true"
+
+  - name: "pvp-arena"
+    port: 19134
+    version: "1.20.50"
+    world_name: "pvp"
+    level_seed: "555666777"
+    level_type: "DEFAULT"
+    gamemode: "adventure"
+    difficulty: "hard"
+    max_players: 50
+    online_mode: true
+    pvp: true
+    allow_flight: false
+    motd: "PvP Arena - Fight to the Death!"
+    whitelist: []
+    ops:
+      - "admin1"
+    default_player_permission_level: "visitor"
+    content_log_file_enabled: true
+    enable_scripts: false
+    enable_command_blocking: true
+    max_threads: 12
+    player_idle_timeout: 15
+    max_world_size: 2000
+    properties:
+      server-authoritative-movement: "server-auth"
+      player-movement-score-threshold: "10"
+      keep-inventory: "false"
+
+  - name: "test-server"
+    port: 19135
+    version: "1.20.50"
+    world_name: "test"
+    level_seed: ""
+    level_type: "DEFAULT"
+    gamemode: "survival"
+    difficulty: "easy"
+    max_players: 5
+    online_mode: false
+    pvp: true
+    allow_flight: true
+    motd: "Test Server"
+    whitelist: []
+    ops: []
+    default_player_permission_level: "operator"
+    content_log_file_enabled: false
+    enable_scripts: true
+    enable_command_blocking: false
+    max_threads: 2
+    player_idle_timeout: 120
+    max_world_size: 1000
+    properties:
+      allow-cheats: "true"
+      server-authoritative-movement: "client-auth"
+
+  - name: "minigames"
+    port: 19136
+    version: "1.20.50"
+    world_name: "minigames"
+    level_seed: "111222333"
+    level_type: "DEFAULT"
+    gamemode: "adventure"
+    difficulty: "normal"
+    max_players: 30
+    online_mode: true
+    pvp: true
+    allow_flight: false
+    motd: "Mini-Games Server"
+    whitelist: []
+    ops:
+      - "admin1"
+      - "moderator1"
+    default_player_permission_level: "member"
+    content_log_file_enabled: true
+    enable_scripts: true
+    enable_command_blocking: true
+    max_threads: 6
+    player_idle_timeout: 45
+    max_world_size: 3000
+    properties:
+      server-authoritative-movement: "server-auth"
+      keep-inventory: "true"
+      enable-command-block: "true" 
