@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  minecraft-manager:
+    build: .
+    container_name: minecraft-bedrock-server-manager
+    restart: unless-stopped
+    ports:
+      - "8080:8080"  # HTTP API
+      - "19132:19132"  # Bedrock servers
+      - "19133:19133"
+      - "19134:19134"
+      - "19135:19135"
+      - "19136:19136"
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./bedrock_server:/app/bedrock_server:ro  # Mount Bedrock server executable
+      - minecraft-servers:/app/servers
+    environment:
+      - CONFIG_PATH=/app/config.yaml
+    networks:
+      - minecraft-network
+
+volumes:
+  minecraft-servers:
+    driver: local
+
+networks:
+  minecraft-network:
+    driver: bridge 

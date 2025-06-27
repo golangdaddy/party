@@ -1,0 +1,15 @@
+github:
+  repo_owner: "golangdaddy"
+  repo_name: "party"
+  branch: "main"
+  config_path: "servers.yaml"
+  poll_interval: 300  # seconds
+
+http:
+  port: 8080
+
+server:
+  base_dir: "./servers"
+  max_instances: 5
+  bedrock_path: "./bedrock_server"  # Path to Bedrock server executable
+  memory_limit: "1G" 
